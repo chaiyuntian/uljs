@@ -9,6 +9,12 @@ ul.DEBUG = true;
 ul.log = function(){if(ul.DEBUG){console.log.apply(console,arguments);}};
 ul.error = function(){if(true){console.error.apply(console, arguments);}};
 ul.warn = function(){if(ul.DEBUG){console.warn.apply(console, arguments);}};
+// Animation Frame Request
+window.requestAnimFrame = (function() {return window.requestAnimationFrame || window.webkitRequestAnimationFrame || window.mozRequestAnimationFrame || window.oRequestAnimationFrame || window.msRequestAnimationFrame ||
+    function(/* function FrameRequestCallback */ callback, /* DOMElement Element */ element) {
+        window.setTimeout(callback, 1000/60);
+    };
+})();
 //Shader
 ul.SHADER_TYPE = {FRAG:1,VERT:2};
 ul.PANO_VS = "attribute vec3 position;uniform mat4 modelMatrix;uniform mat4 modelViewMatrix;uniform mat4 projectionMatrix;varying vec3 vWorldPosition;void main() {vWorldPosition =  normalize( ( modelMatrix * vec4( position, 0.0 ) ).xyz );gl_Position = projectionMatrix * modelViewMatrix * vec4( position,1.0);}";
@@ -98,6 +104,44 @@ ul.texture = function(gl,url){
     image.src = url;
     return texture;
 };
+
+ul.videoTexture = function(gl,videoID)
+{
+    var video = document.getElementById(videoID);
+    var texture = gl.createTexture();
+    texture.started = false;
+
+    var videoDataReady = function(){
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE,video);
+        //gl.generateMipmap(gl.TEXTURE_2D);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T,     gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S,     gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.bindTexture(gl.TEXTURE_2D, null);
+        //texture.loaded = true;
+    };
+
+    function update() {
+        window.requestAnimFrame(update);
+        if ( video.readyState === video.HAVE_ENOUGH_DATA ) {
+            videoDataReady();
+        }
+    };
+    //update();
+    texture.startUpdate = function()
+    {
+        texture.started = true;
+        video.play();
+        update();
+    };
+    texture.update = update;
+
+    return texture;
+};
+
 //BufferAttribute
 ul.BufferAttribute = function(arr,itemSize){
     this.array = arr;
@@ -204,7 +248,6 @@ function getGLContext(canvas){
     }
     return gl;
 }
-
 //Math
 var d2r_coef =  Math.PI / 180;
 ul.math = {
@@ -224,7 +267,6 @@ ul.axis = {
     Y:[0,1,0],
     Z:[0,0,1]
 };
-
 //Camera
 ul.camera = function(fov,n,f,a){
     this.fov = fov ;
@@ -237,9 +279,10 @@ ul.camera = function(fov,n,f,a){
 ul.camera.prototype.updateProjMatrix = function(){
     mat4.perspective(this.projMatrix,ul.math.d2r(this.fov),this.aspect , this.near, this.far);
 };
-
 ul.renderer = function(){
     var _canvas = document.createElement("canvas");
+    //_canvas.width = window.innerWidth;
+    //_canvas.height= window.innerHeight;
     var _width = _canvas.width;
     var _height = _canvas.height;
 
@@ -265,7 +308,9 @@ ul.renderer = function(){
     this.program = _program;
 
     var _skySphere =  ul.Sphere(400.0, 24, 24);
-    var _skyTexture = ul.texture(_gl,"http://7xni8y.com1.z0.glb.clouddn.com/sphere.jpg");// texture buffer
+    //var _skyTexture = ul.texture(_gl,"http://7xni8y.com1.z0.glb.clouddn.com/sphere.jpg");// texture buffer
+    var _skyTexture = ul.videoTexture(_gl,"video");// texture buffer
+
     var _tFlip = -1.0;// whether flip texture or not
 
     var _sphereVertexBuffer = _gl.createBuffer();
@@ -279,7 +324,7 @@ ul.renderer = function(){
     _gl.bindBuffer(_gl.ELEMENT_ARRAY_BUFFER, null);
     _gl.bindBuffer(_gl.ARRAY_BUFFER,null);
 
-    var _camera = new ul.camera(70,0.1, 10000.0,_width / _height);
+    var _camera = new ul.camera(45,0.1, 10000.0,_canvas.width/_canvas.height);//
     _camera.updateProjMatrix();
     this.camera = _camera;
 
@@ -301,7 +346,7 @@ ul.renderer = function(){
         _viewportY = y * pixelRatio;
         _viewportWidth = width * pixelRatio;
         _viewportHeight = height * pixelRatio;
-        _gl.viewport( _viewportX, _viewportY, _viewportWidth, _viewportHeight );
+        _gl.viewport( _viewportX, _viewportY,_viewportWidth,_viewportHeight );// _viewportWidth, _viewportHeight
     };
 
     this.setSize = function ( width, height, updateStyle ) {
@@ -316,6 +361,8 @@ ul.renderer = function(){
             _canvas.style.height = height + 'px';
 
         }
+        _camera.aspect = width/height;
+        _camera.updateProjMatrix();
         this.setViewport( 0, 0, width, height );
     };
 
@@ -330,18 +377,13 @@ ul.renderer = function(){
         _gl.clear(_gl.COLOR_BUFFER_BIT|_gl.DEPTH_BUFFER_BIT);
         _gl.enableVertexAttribArray(_program.attributes.position);
 
-        // mat4.perspective(pMatrix,70,_width / _height , 0.1, 10000.0);//
-        //mat4.identity(mvMatrix);
-        //mat4.translate(mvMatrix, [0.0, 0.0, -2.0]); //Sets the camera to a reasonable distance to view the part
-        //var angle = 1;
-        //mat4.rotate(mvMatrix,mvMatrix,angle * Math.PI / 180, vec3.fromValues(0, 1, 0));
-
+        // update the properties anb make new;
         _gl.uniformMatrix4fv(_program.uniforms.modelMatrix, false, mMatrix);
         _gl.uniformMatrix4fv(_program.uniforms.modelViewMatrix, false, mvMatrix);
         _gl.uniformMatrix4fv(_program.uniforms.projectionMatrix, false, _camera.projMatrix);
         _gl.uniform1f(_program.uniforms.tFlip, _tFlip);
 
-        if(_skyTexture.loaded)
+        if(_skyTexture.started)
         {
             _gl.activeTexture(_gl.TEXTURE0);
             _gl.bindTexture(_gl.TEXTURE_2D, _skyTexture);
@@ -357,14 +399,10 @@ ul.renderer = function(){
         _gl.bindBuffer(_gl.ARRAY_BUFFER, null);
         _gl.bindBuffer(_gl.ELEMENT_ARRAY_BUFFER, null);
     };
+
+    _skyTexture.startUpdate();
 };
 
-// Animation Frame Request
-window.requestAnimFrame = (function() {return window.requestAnimationFrame || window.webkitRequestAnimationFrame || window.mozRequestAnimationFrame || window.oRequestAnimationFrame || window.msRequestAnimationFrame ||
-        function(/* function FrameRequestCallback */ callback, /* DOMElement Element */ element) {
-            window.setTimeout(callback, 1000/60);
-        };
-})();
 
 ul.mouseController = function(renderer){
 
@@ -422,9 +460,10 @@ ul.mouseController = function(renderer){
     };
 
     var handleWindowResize = function(event){
-        _camera.aspect = window.innerWidth / window.innerHeight;
-        _camera.updateProjMatrix();
-        _renderer.setSize(window.innerWidth, window.innerHeight);
+
+        renderer.setSize(window.innerWidth, window.innerHeight,true);
+        renderer.renderScene();
+        ul.log("resized");
     };
 
     var BindAllEvents = function(){
@@ -433,7 +472,7 @@ ul.mouseController = function(renderer){
         document.addEventListener( 'mouseup', handleMouseUp, false );
         document.addEventListener( 'mousewheel', handleMouseWheel, false );
         document.addEventListener( 'MozMousePixelScroll', handleMouseWheel, false);
-        document.addEventListener('resize',handleWindowResize,false);
+        window.addEventListener('resize',handleWindowResize,false);
     };
 
     var UnBindAllEvents = function(){
@@ -442,7 +481,7 @@ ul.mouseController = function(renderer){
         document.removeEventListener( 'mouseup', handleMouseUp, false );
         document.removeEventListener( 'mousewheel', handleMouseWheel, false );
         document.removeEventListener( 'MozMousePixelScroll', handleMouseWheel, false);
-        document.removeEventListener('resize',handleWindowResize,false);
+        window.removeEventListener('resize',handleWindowResize,false);
     };
 
     this.BindEvents = BindAllEvents;
